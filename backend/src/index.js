@@ -1,6 +1,5 @@
 import express from "express";
 import dotenv from "dotenv";
-import passport from "./config/passport.js";
 import cookieParser from "cookie-parser";
 import path from "path";
 import cors from "cors";
@@ -33,10 +32,6 @@ app.use(session({
   cookie: { secure: process.env.NODE_ENV === 'production' }
 }));
 
-// Passport initialization
-app.use(passport.initialize());
-app.use(passport.session());
-
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
@@ -49,15 +44,6 @@ if (process.env.NODE_ENV !== "development") {
     res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"));
   });
 }
-
-// Google authentication routes
-app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-app.get("/auth/google/callback", passport.authenticate("google", { failureRedirect: "/login" }), async (req, res) => {
-  const { accessToken, refreshToken } = generateTokens(req.user._id);
-  await storeRefreshToken(req.user._id, refreshToken);
-  setCookies(res, accessToken, refreshToken);
-  res.redirect("/");
-});
 
 // Logout route
 app.get("/auth/logout", (req, res) => {

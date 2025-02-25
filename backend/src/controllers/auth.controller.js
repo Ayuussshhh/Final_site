@@ -1,98 +1,55 @@
-import { redis } from "../lib/redis.js";
-import User from "../models/user.model.js";
-import jwt from "jsonwebtoken";
-import { OAuth2Client } from 'google-auth-library';
+import { generateToken } from '../lib/utils.js';
+import User from '../models/user.model.js';
+import bcrypt from 'bcryptjs';
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-// Function to create default admin
-const createDefaultAdmin = async () => {
-    const adminExists = await User.findOne({ email: 'ayush.1429agr@gmail.com' });
-    if (!adminExists) {
-        // Define the default values for the missing fields
-        const defaultCity = 'SomeCity';  // Replace with your desired city
-        const defaultCollegeName = 'SomeCollege';  // Replace with your desired college name
-        const defaultEnrollmentNumber = '123456789';  // Replace with your desired enrollment number
-
-        const admin = await User.create({
-            name: 'Ayush',
-            email: 'ayush.1429agr@gmail.com',
-            password: '3264623', // This will be hashed automatically when saved
-            role: 'admin', // Admin role for this user
-            city: defaultCity,
-            collegeName: defaultCollegeName,
-            enrollmentNumber: defaultEnrollmentNumber
-        });
-
-        console.log('Default admin user created:', admin);
-
-        // Generate JWT tokens for the newly created admin
-        const { accessToken, refreshToken } = generateTokens(admin._id);
-
-        // Optionally, store the refresh token in Redis
-        await storeRefreshToken(admin._id, refreshToken);
-
-        console.log('JWT Access Token:', accessToken);
-        console.log('JWT Refresh Token:', refreshToken);
-    }
-};
-
-// Call this function when the server starts to create a default admin
-createDefaultAdmin();
-
-// Function to set cookies with JWT tokens
-const setCookies = (res, accessToken, refreshToken) => {
-    res.cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-    res.cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-};
-
-// Admin Signup route (only allows admin users to sign up other admins)
-// signup controller
-// signup controller
+// User signup handler
 export const signup = async (req, res) => {
     try {
-        console.log("Received data:", req.body);  // Log request data
-        
         const { name, email, password, city, collegeName, enrollmentNumber } = req.body;
 
-        if (!city || !collegeName || !enrollmentNumber) {
+        // Check if essential fields are present
+        if (!name || !email || !password || !city || !collegeName || !enrollmentNumber) {
             return res.status(400).json({
-                message: "City, College Name, and Enrollment Number are required"
+                message: "All fields (Name, Email, Password, City, College Name, and Enrollment Number) are required"
             });
         }
 
+        // Check if email already exists in the database
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ message: "Email already in use" });
         }
 
+        // Hash the password before storing it
+        const hashedPassword = bcrypt.hashSync(password, 10);
+
+        // Create a new user in the database
         const newUser = new User({
             name,
             email,
-            password,
+            password: hashedPassword,
             city,
             collegeName,
             enrollmentNumber,
         });
 
+        // Save the new user to the database
         await newUser.save();
 
-        const { accessToken, refreshToken } = generateTokens(newUser._id);
+        // Generate a JWT token using the new user's ID
+        generateToken(newUser._id, res);
 
+        // Respond with success message and user data (excluding password)
         res.status(201).json({
             message: "User created successfully",
-            token: accessToken,
-            user: newUser
+            user: {
+                _id: newUser._id,
+                fullName: newUser.name,
+                email: newUser.email,
+                city: newUser.city,
+                collegeName: newUser.collegeName,
+                enrollmentNumber: newUser.enrollmentNumber,
+            },
         });
     } catch (error) {
         console.error("Error during signup:", error.message);
@@ -100,62 +57,58 @@ export const signup = async (req, res) => {
     }
 };
 
-// Google signup route
-export const googleSignup = async (req, res) => {
-    const { token } = req.body;
+// User login handler
+export const login = async (req, res) => {
+    const { email, password } = req.body;
+
     try {
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        const { name, email, sub: googleId } = ticket.getPayload();
-
-        let user = await User.findOne({ googleId });
-
+        // Find user by email
+        const user = await User.findOne({ email });
         if (!user) {
-            user = await User.create({ name, email, googleId });
-        } else {
-            return res.status(400).json({ message: "User already exists" });
+            return res.status(400).json({ message: 'Invalid credentials' });
         }
 
-        const authToken = jwt.sign({ userId: user._id }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+        // Compare password
+        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        if (!isPasswordCorrect) {
+            return res.status(400).json({ message: 'Invalid credentials' });
+        }
 
-        res.status(200).json({ token: authToken });
+        // Generate JWT token and send it in response
+        generateToken(user._id, res);
+
+        res.status(200).json({
+            _id: user._id,
+            fullName: user.fullName,
+            email: user.email,
+            profilePic: user.profilePic
+        });
+
     } catch (error) {
-        console.error('Error during Google signup:', error);
-        res.status(500).json({ message: 'Server error during Google signup' });
+        console.log('Error in login controller', error.message);
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 };
 
-// Get user profile
-export const getProfile = async (req, res) => {
+// User logout handler
+export const logout = (req, res) => {
     try {
-        const user = await User.findById(req.user._id).select('-password');
-        res.status(200).json(user);
+        // Clear JWT cookie on logout
+        res.cookie('jwt', '', { maxAge: 0 });
+        res.status(200).json({ message: 'Logged out successfully' });
+
     } catch (error) {
-        console.error('Error fetching profile:', error);
-        res.status(500).json({ message: 'Server error fetching profile' });
+        console.log('Error in logout controller', error.message);
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 };
 
-// Refresh token route
-const generateTokens = (userId) => {
-    const accessToken = jwt.sign(
-        { userId },
-        process.env.ACCESS_TOKEN_SECRET, 
-        { expiresIn: '15m' } // Access token expires in 15 minutes
-    );
-
-    const refreshToken = jwt.sign(
-        { userId },
-        process.env.REFRESH_TOKEN_SECRET, 
-        { expiresIn: '7d' } // Refresh token expires in 7 days
-    );
-
-    return { accessToken, refreshToken };
-};
-
-// Function to store refresh token in Redis
-const storeRefreshToken = async (userId, refreshToken) => {
-    await redis.set(userId.toString(), refreshToken, 'EX', 7 * 24 * 60 * 60); // Expires in 7 days
+// Check authentication handler
+export const checkAuth = (req, res) => {
+    try {
+        res.status(200).json(req.user);  // Return the authenticated user info
+    } catch (error) {
+        console.log('Error in checkAuth controller', error.message);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
 };

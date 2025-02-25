@@ -1,20 +1,23 @@
 import express from "express";
-import { signup, googleSignup, getProfile } from "../controllers/auth.controller.js"; // Adjusted the path
-import { protectRoute, adminRoute } from "../middleware/auth.middleware.js";
+import { signup,login, logout, checkAuth } from "../controllers/auth.controller.js"; // Adjusted the path
+import { protectRoute } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 // User signup route
 router.post("/signup", signup);
 
-// Google signup route
-router.post("/google-signup", googleSignup);
+// User login route
+router.post('/login', login);
 
-// Admin signup route (protected by adminRoute middleware)
-router.post("/admin-signup", protectRoute, adminRoute);
+// User logout route
+router.post('/logout', logout);
+
+// Check authentication route (protected by protectRoute middleware)
+router.get('/check', protectRoute, checkAuth);
 
 // Profile routes
-router.get("/profile", protectRoute, getProfile); // Get user profile
-// Update user profile
+router.get("/profile", protectRoute,); // Get user profile
+router.put("/profile", protectRoute); // Update user profile
 
 export default router;

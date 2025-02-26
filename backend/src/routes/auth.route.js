@@ -1,6 +1,6 @@
 import express from "express";
-import { signup,login, logout, checkAuth } from "../controllers/auth.controller.js"; // Adjusted the path
-import { protectRoute } from "../middleware/auth.middleware.js";
+import { signup, login, logout, checkAuth, getUser } from "../controllers/auth.controller.js";
+import { protectRoute } from "../middleware/auth.middleware.js"; // Use protectRoute for cookie validation
 
 const router = express.Router();
 
@@ -13,11 +13,10 @@ router.post('/login', login);
 // User logout route
 router.post('/logout', logout);
 
-// Check authentication route (protected by protectRoute middleware)
+// Check authentication route (protected by protectRoute middleware - checks cookies)
 router.get('/check', protectRoute, checkAuth);
 
-// Profile routes
-router.get("/profile", protectRoute,); // Get user profile
-router.put("/profile", protectRoute); // Update user profile
+// Get user data (protected route)
+router.get('/user', protectRoute, getUser);  // Ensure you use protectRoute here to check cookies
 
 export default router;
